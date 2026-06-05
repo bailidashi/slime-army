@@ -520,11 +520,11 @@ class DesktopPet(QWidget):
         PETS.append(self)  # 注册到全局
         self._state = "idle"
         self._frame = 0
-        self._grow = 0  # 双击变大动画计数器
         self._pet_scale = 1.0  # 体型缩放（生崽会变小）
         self._spawn_count = 0  # 已生崽次数，最多3次
         self._chasing = False  # 正在追鼠标
-        self._angry = 0  # 生气倒计时（帧数）
+        self._grow = 0  # 双击变大
+        self._angry = 0  # 生气倒计时
         self._drag_count = 0  # 连续拖拽次数
         self._drag_timer = 0  # 拖拽计时器
         self._countdown = random.randint(180, 350)
@@ -594,9 +594,13 @@ class DesktopPet(QWidget):
         hack_menu.addAction("开始钓鱼 (视觉)", lambda: self._start_fish("visual"))
         hack_menu.addAction("开始钓鱼 (定时)", lambda: self._start_fish("timed"))
         hack_menu.addAction("停止钓鱼", self._stop_fishing)
+        hack_menu.addSeparator()
+        hack_menu.addAction("连点器...", self._auto_clicker_dialog)
         m.addSeparator()
         m.addAction("喂食", self._feed)
         m.addAction(f"生一只 ({3 - self._spawn_count}/3)", self._spawn_child)
+        if self._find_nearby():
+            m.addAction("合体", self._fusion)
         m.addAction("重置", self._reset)
         m.addSeparator()
         m.addAction("打开回收站 🗑️", self._open_trash)
@@ -634,7 +638,7 @@ class DesktopPet(QWidget):
             self._bubble_text = random.choice(msgs)
             self._bubble_timer = 90
             self._drag_count = 0
-        # 双击变大动画
+        # 双击变大
         if self._grow > 0:
             self._grow -= 1
         if self._tx is not None and self.state == "walk":
@@ -823,7 +827,7 @@ class DesktopPet(QWidget):
 
     def mouseDoubleClickEvent(self, e):
         if e.button() == Qt.LeftButton and self._angry == 0:
-            self._grow = 30  # 启动变大动画（30帧）
+            self._grow = 30
 
     # ---- 文件拖放（表情位预留，待朋友画 SURPRISE_PX / EAT_PX）----
     def dragEnterEvent(self, e):
@@ -836,7 +840,7 @@ class DesktopPet(QWidget):
         self._set_s("idle")
 
     def dropEvent(self, e):
-        self._set_s("eat")  # TODO: 替换为 EAT_PX 表情
+        self._set_s("eat")
         QTimer.singleShot(1500, lambda: self._set_s("idle"))
         # 把文件丢进回收站
         for url in e.mimeData().urls():
@@ -849,7 +853,7 @@ class DesktopPet(QWidget):
                         f"[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('{path}',"
                         f"'OnlyErrorDialogs','SendToRecycleBin')"
                     ], shell=True)
-                    print(f"Eaten → recycle bin: {os.path.basename(path)}")
+                    print(f"Eaten -> recycle bin: {os.path.basename(path)}")
                 except Exception as err:
                     print(f"Failed to delete: {err}")
 
@@ -874,9 +878,13 @@ class DesktopPet(QWidget):
         hack_menu.addAction("开始钓鱼 (视觉)", lambda: self._start_fish("visual"))
         hack_menu.addAction("开始钓鱼 (定时)", lambda: self._start_fish("timed"))
         hack_menu.addAction("停止钓鱼", self._stop_fishing)
+        hack_menu.addSeparator()
+        hack_menu.addAction("连点器...", self._auto_clicker_dialog)
         m.addSeparator()
         m.addAction("喂食", self._feed)
         m.addAction(f"生一只 ({3 - self._spawn_count}/3)", self._spawn_child)
+        if self._find_nearby():
+            m.addAction("合体", self._fusion)
         m.addAction("重置", self._reset)
         m.addSeparator()
         m.addAction("打开回收站 🗑️", self._open_trash)
@@ -889,8 +897,13 @@ class DesktopPet(QWidget):
         m.exec_(e.globalPos())
 
     def _feed(self):
-        self.state = "happy"; self._frame = 0; self._inactive = 0
-        QTimer.singleShot(2000, lambda: self._set_s("idle"))
+        if self._angry > 0:
+            self._angry = 0
+            self._bubble_text = "原谅你了~"
+            self._bubble_timer = 40
+        else:
+            self.state = "happy"; self._frame = 0; self._inactive = 0
+            QTimer.singleShot(2000, lambda: self._set_s("idle"))
 
     def _reset(self):
         self.state = "idle"; self._frame = 0; self._inactive = 0
@@ -1007,6 +1020,26 @@ class DesktopPet(QWidget):
         editor_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pixel_editor.html")
         os.startfile(editor_path)
 
+    def _auto_clicker_dialog(self):
+        """连点器对话框：设置次数和间隔"""
+        from PyQt5.QtWidgets import QInputDialog
+        count, ok1 = QInputDialog.getInt(self, "连点器", "点击次数:", 100, 1, 99999, 1)
+        if not ok1: return
+        interval, ok2 = QInputDialog.getInt(self, "连点器", "间隔(毫秒):", 100, 10, 5000, 10)
+        if not ok2: return
+        print(f"连点器：{count}次, 间隔{interval}ms, 3秒后开始...")
+        self._bubble_text = f"点{count}下!"
+        self._bubble_timer = 30
+        threading.Thread(target=self._auto_clicker_run,
+                         args=(count, interval / 1000.0), daemon=True).start()
+
+    def _auto_clicker_run(self, count, interval):
+        time.sleep(3)
+        for i in range(count):
+            if self._mode != "fish":  # 不钓鱼就不取消
+                pyautogui.click()
+                time.sleep(interval)
+
     def _import_skin(self):
         """粘贴代码导入皮肤"""
         from PyQt5.QtWidgets import QInputDialog, QTextEdit
@@ -1110,6 +1143,26 @@ start "" "{sys.executable.replace('.exe', 'w.exe')}" "d:\\skill\\desktop_pet\\pe
             self._autostart = True
         self._autostart_action.setText(f"{'☑' if self._autostart else '☐'} 开机自启")
 
+    def _find_nearby(self):
+        """检查附近有没有其他史莱姆"""
+        for other in PETS:
+            if other is self or other._hidden: continue
+            dist = math.hypot(self.x()-other.x(), self.y()-other.y())
+            if dist < 150: return True
+        return False
+
+    def _fusion(self):
+        """合体：吃掉附近一只史莱姆，自己变大"""
+        for other in PETS:
+            if other is self or other._hidden: continue
+            dist = math.hypot(self.x()-other.x(), self.y()-other.y())
+            if dist < 150:
+                self._pet_scale = min(3.0, self._pet_scale + other._pet_scale * 0.4)
+                self._bubble_text = "合体成功！"
+                self._bubble_timer = 60
+                other._quit()
+                return
+
     def _quit(self):
         PETS.remove(self)
         if not PETS:
@@ -1156,7 +1209,6 @@ start "" "{sys.executable.replace('.exe', 'w.exe')}" "d:\\skill\\desktop_pet\\pe
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, False)
-        # 双击变大 + 体型缩放
         scale = self._pet_scale
         if self._grow > 0:
             scale *= 1.0 + math.sin(self._grow / 30 * math.pi) * 0.4
