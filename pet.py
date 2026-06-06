@@ -5,6 +5,22 @@
 """
 
 import sys, random, math, os, subprocess, time, threading, re
+
+# ========== 路径兼容（exe + 开发模式）==========
+def _get_path(filename=""):
+    """开发模式同目录，exe模式从内部资源或AppData找"""
+    if getattr(sys, 'frozen', False):
+        base = sys._MEIPASS  # PyInstaller 临时解压目录
+        if filename:
+            p = os.path.join(base, filename)
+            if os.path.exists(p): return p
+        # 需要写入的文件（skins）放在 AppData
+        appdata = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "SlimePet")
+        os.makedirs(appdata, exist_ok=True)
+        return os.path.join(appdata, filename) if filename else appdata
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(base, filename) if filename else base
 from PyQt5.QtWidgets import QApplication, QWidget, QMenu, QSystemTrayIcon, QDialog, QLabel, QVBoxLayout, QPushButton
 from PyQt5.QtCore import Qt, QTimer, QPoint, QRect
 from PyQt5.QtGui import QPainter, QColor, QBrush, QPen, QPixmap, QIcon, QFont, QCursor
@@ -201,7 +217,7 @@ add_skin("炫彩史莱姆", [
 }, fixed=set(), blend=0.9)  # 炫彩史莱姆：90% 融合背景
 
 # ========== 自定义皮肤（skins 文件夹）==========
-CUSTOM_SKINS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skins")
+CUSTOM_SKINS_DIR = _get_path("skins")
 BUILTIN_COUNT = len(SKINS)  # 内置皮肤数量
 
 def _parse_skin_file(filepath):
@@ -1016,9 +1032,13 @@ class DesktopPet(QWidget):
             "start_slime.bat")
 
     def _open_editor(self):
-        """打开浏览器画板"""
-        editor_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pixel_editor.html")
-        os.startfile(editor_path)
+        """打开浏览器画板（exe兼容）"""
+        html = _get_path("pixel_editor.html")
+        if os.path.exists(html):
+            os.startfile(html)
+        else:
+            import webbrowser
+            webbrowser.open("https://bailidashi.github.io/pixel_editor.html")
 
     def _auto_clicker_dialog(self):
         """连点器对话框：设置次数和间隔"""
@@ -1133,11 +1153,14 @@ class DesktopPet(QWidget):
             os.remove(sp)
             self._autostart = False
         else:
-            # 直接写 .bat 到启动文件夹，不用 PowerShell
-            bat = f'''@echo off
-cd /d "d:\\skill\\desktop_pet"
-start "" "{sys.executable.replace('.exe', 'w.exe')}" "d:\\skill\\desktop_pet\\pet.py"
-'''
+            if getattr(sys, 'frozen', False):
+                # exe 模式：自启指向 exe 自身
+                bat = f'@echo off\r\nstart "" "{sys.executable}"'
+            else:
+                # 开发模式
+                pyw = sys.executable.replace('.exe', 'w.exe')
+                script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pet.py")
+                bat = f'@echo off\r\ncd /d "{os.path.dirname(script)}"\r\nstart "" "{pyw}" "{script}"'
             with open(sp, 'w') as f:
                 f.write(bat)
             self._autostart = True
