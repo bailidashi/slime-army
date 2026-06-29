@@ -2,4 +2,4 @@
 :: 像素画编辑器 — 浏览器打开
 :: ====================================
 @echo off
-start "" "d:\skill\desktop_pet\pixel_editor.html"
+start "" "%~dp0pixel_editor.html"

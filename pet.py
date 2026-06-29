@@ -31,16 +31,9 @@ import pyautogui  # 钓鱼鼠标控制
 # ====================================================
 #  皮肤系统
 # ====================================================
-# 全局当前皮肤数据（不是 property，直接当变量用）
-IDLE_PX   = []
-JUMP_PX   = []
-SQUASH_PX = []
-SLEEP_PX  = []
-PALETTE   = {}
-FIXED_KEYS = set()
-
+# SKINS: 全局皮肤库（共享），每个 pet 实例有自己的 skin_idx
 SKINS = []
-SKIN_INDEX = 0
+_DEFAULT_SKIN = 0  # 新史莱姆默认皮肤
 
 def _auto_jump(px):
     """生成跳跃帧：底部加身体行"""
@@ -84,19 +77,11 @@ def add_skin(name, idle_px, palette, fixed=None, blend=0.35):
         "cols": len(idle_px[0]),
     })
 
-def apply_skin(index):
-    """切换到指定皮肤"""
-    global SKIN_INDEX, IDLE_PX, JUMP_PX, SQUASH_PX, SLEEP_PX, PALETTE, FIXED_KEYS
-    s = SKINS[index]
-    SKIN_INDEX = index
-    IDLE_PX   = s["idle"]
-    JUMP_PX   = s["jump"]
-    SQUASH_PX = s["squash"]
-    SLEEP_PX  = s["sleep"]
-    PALETTE   = s["palette"]
-    FIXED_KEYS = s["fixed"]
-    Slime.COLS = s["cols"]
-    Slime.ROWS = len(IDLE_PX)
+def _skin_data(index=None):
+    """获取皮肤数据字典，index 默认用 _DEFAULT_SKIN"""
+    if index is None:
+        index = _DEFAULT_SKIN
+    return SKINS[index]
 
 # ========== 注册皮肤 ==========
 add_skin("紫晶史莱姆", [
@@ -236,7 +221,8 @@ def _parse_skin_file(filepath):
         if not rows: return None
         name = os.path.splitext(os.path.basename(filepath))[0]
         return name, rows, palette
-    except:
+    except (OSError, json.JSONDecodeError, ValueError) as err:
+        print(f"  [皮肤解析失败] {filepath}: {err}")
         return None
 
 def _load_custom_skins():
@@ -272,37 +258,36 @@ def _delete_custom_skin(index):
     if os.path.exists(path):
         os.remove(path)
     _load_custom_skins()
-    apply_skin(0)
+    _DEFAULT_SKIN = 0  # 重置默认皮肤
 
 class Slime:
     PX_SCALE = 7
-    COLS = 15  # apply_skin 会更新
+    COLS = 15  # 由注册皮肤时更新
     CANVAS = 160
 
     @staticmethod
-    def make(state: str, frame: int, bg_color: tuple = None) -> QPixmap:
+    def make(state: str, frame: int, bg_color: tuple = None, skin_idx: int = 0) -> QPixmap:
+        sk = SKINS[skin_idx]  # 从全局皮肤库读取
         pix = QPixmap(Slime.CANVAS, Slime.CANVAS + 30)
         pix.fill(Qt.transparent)
         p = QPainter(pix)
         p.setRenderHint(QPainter.Antialiasing, False)
 
         s = Slime.PX_SCALE
-        bw = Slime.COLS * s   # 身体像素宽
-        bh = Slime.ROWS * s   # 身体像素高
+        bw = sk["cols"] * s
+        bh = len(sk["idle"]) * s
 
         # ========== 背景色换色相 ==========
-        tint_palette = PALETTE.copy()
+        tint_palette = sk["palette"].copy()
         if bg_color:
             br, bg, bb = bg_color
-            # 取背景的色相和亮度
             bhue, bsat, blight = Slime._rgb_to_hsl(br, bg, bb)
-            # 如果背景太暗，加一点亮度让史莱姆不至于全黑
             if blight < 0.25:
                 blight = 0.25
 
-            blend = SKINS[SKIN_INDEX].get("blend", 0.35)
-            for key, color in PALETTE.items():
-                if key in FIXED_KEYS:
+            blend = sk.get("blend", 0.35)
+            for key, color in sk["palette"].items():
+                if key in sk["fixed"]:
                     tint_palette[key] = color
                     continue
                 r, g, b = color.red(), color.green(), color.blue()
@@ -317,10 +302,10 @@ class Slime:
         # ========== 果冻形变参数 ==========
         sx, sy = 1.0, 1.0       # 缩放
         offset_y = 0             # 垂直偏移
-        px = IDLE_PX
+        px = sk["idle"]
 
         if state == "sleep":
-            px = SLEEP_PX
+            px = sk["sleep"]
             sx, sy = 1.25, 0.65  # 扁趴趴
             offset_y = 15
 
@@ -455,11 +440,11 @@ class Slime:
     def _hearts(p, bw, bh, s, frame):
         cx = Slime.CANVAS // 2
         cy = Slime.CANVAS // 2 - bh // 2
-        p.setPen(QPen(QColor(255, 80, 120), 2))
+        p.setPen(QPen(QColor(255, 60, 100), 3))
         hearts = [
-            (cx - bw//3,     cy - 3,  int(6 + math.sin(frame * 0.15) * 2)),
-            (cx + bw//3 - 4, cy - 8,  int(5 + math.sin(frame * 0.22 + 1) * 2)),
-            (cx,             cy - 16, int(4 + math.sin(frame * 0.27) * 2)),
+            (cx - bw//3,     cy - 3,  int(12 + math.sin(frame * 0.15) * 3)),
+            (cx + bw//3 - 4, cy - 8,  int(10 + math.sin(frame * 0.22 + 1) * 3)),
+            (cx,             cy - 16, int(8  + math.sin(frame * 0.27) * 3)),
         ]
         for hx, hy, sz in hearts:
             f = QFont("Arial", sz)
@@ -468,7 +453,7 @@ class Slime:
 
 
 _load_custom_skins()  # 加载用户自制皮肤
-apply_skin(0)  # 默认紫晶史莱姆
+_DEFAULT_SKIN = 0  # 初始默认皮肤
 
 # ====================================================
 #  全局宠物管理
@@ -548,6 +533,7 @@ class DesktopPet(QWidget):
         self._drag_offset = QPoint()
         self._tx = None; self._ty = None
         self._inactive = 0
+        self.skin_idx = _DEFAULT_SKIN  # 每只宠物的独立皮肤
 
         self.setWindowTitle("My Slime")
         self.setFixedSize(Slime.CANVAS, Slime.CANVAS + 70)  # 顶部留空间给气泡
@@ -560,6 +546,7 @@ class DesktopPet(QWidget):
         self._mode_names = {"active": "活跃模式", "quiet": "安静模式", "hunt": "贪吃模式"}
         self._fish_submode = "visual"  # visual / timed
         self._fish_running = False
+        self._fish_lock = threading.Lock()  # 保护 _fish_running
         self._fish_submode_names = {"visual": "视觉检测", "timed": "定时抛竿"}
         self._bubble_text = ""  # 聊天框文字
         self._bubble_timer = 0  # 消失倒计时
@@ -596,7 +583,7 @@ class DesktopPet(QWidget):
         skin_menu.setStyleSheet(PIXEL_MENU_STYLE)
         for i, s in enumerate(SKINS):
             icon = _skin_icon(s)
-            mark = " ◀" if i == SKIN_INDEX else ""
+            mark = " ◀" if i == self.skin_idx else ""
             action = skin_menu.addAction(icon, f"{s['name']}{mark}")
             action.triggered.connect(lambda checked, idx=i: self._switch_skin(idx))
             if i >= BUILTIN_COUNT:
@@ -646,12 +633,10 @@ class DesktopPet(QWidget):
             self._drag_timer -= 1
             if self._drag_timer == 0:
                 self._drag_count = 0
-        # 连续拖拽3次以上 → 生气！
-        if self._drag_count >= 3 and self._angry == 0 and self.state == "drag":
-            self._angry = 120  # 生气60帧=1.2秒? no 要60秒=3600帧
-            self._angry = 400  # 20秒 = 20fps*20
-            msgs = ["别碰我！！！", "生气了！！", "走开！！", "再碰我就跑啦！", "烦死了！"]
-            self._bubble_text = random.choice(msgs)
+        # 连续拖拽5次以上 → 生气！
+        if self._drag_count >= 5 and self._angry == 0 and self.state == "drag":
+            self._angry = 400  # 生气约20秒
+            self._bubble_text = "不给吃的就不理你"
             self._bubble_timer = 90
             self._drag_count = 0
         # 双击变大
@@ -786,10 +771,11 @@ class DesktopPet(QWidget):
         self.state = "walk"
 
     def _switch_skin(self, idx):
-        apply_skin(idx)
+        self.skin_idx = idx
         self._reset()
         # 更新托盘图标颜色（用调色板第一个非'-'颜色）
-        colors = [c for k, c in PALETTE.items() if k != '-']
+        pal = SKINS[idx]["palette"]
+        colors = [c for k, c in pal.items() if k != '-']
         if colors:
             c = colors[len(colors)//2]
             px = QPixmap(32, 32); px.fill(Qt.transparent)
@@ -881,7 +867,7 @@ class DesktopPet(QWidget):
         skin_menu.setStyleSheet(PIXEL_MENU_STYLE)
         for i, s in enumerate(SKINS):
             icon = _skin_icon(s)
-            mark = " ◀" if i == SKIN_INDEX else ""
+            mark = " ◀" if i == self.skin_idx else ""
             action = skin_menu.addAction(icon, f"{s['name']}{mark}")
             action.triggered.connect(lambda checked, idx=i: self._switch_skin(idx))
             if i >= BUILTIN_COUNT:
@@ -951,7 +937,7 @@ class DesktopPet(QWidget):
         """打开 Windows 回收站"""
         try:
             os.startfile("shell:RecycleBinFolder")
-        except:
+        except OSError:
             subprocess.Popen(["explorer", "shell:RecycleBinFolder"])
 
     # ---- 钓一下（一次抛竿+收杆）----
@@ -959,16 +945,20 @@ class DesktopPet(QWidget):
     def _start_fish(self, submode="visual"):
         """开启钓鱼（视觉/定时）"""
         self._fish_submode = submode
-        if self._fish_running: return  # 已经在钓
-        self._fish_running = True
+        with self._fish_lock:
+            if self._fish_running: return  # 已经在钓
+            self._fish_running = True
         print(f"🎣 钓鱼开始 ({self._fish_submode_names[submode]})")
         threading.Thread(target=self._fish_loop, daemon=True).start()
 
     def _stop_fishing(self):
-        self._fish_running = False
+        with self._fish_lock:
+            self._fish_running = False
 
     def _fish_loop(self):
-        while self._fish_running:
+        while True:
+            with self._fish_lock:
+                if not self._fish_running: break
             try:
                 if self._fish_submode == "timed":
                     self._fish_timed()
@@ -1001,7 +991,7 @@ class DesktopPet(QWidget):
                     pyautogui.rightClick()
                     print("Fish caught! (visual)")
                     break
-            except:
+            except (OSError, ValueError, IndexError):
                 pass
         else:
             pyautogui.rightClick()
@@ -1015,7 +1005,7 @@ class DesktopPet(QWidget):
             return
         self._spawn_count += 1
         child = DesktopPet()
-        child._switch_skin(SKIN_INDEX)
+        child._switch_skin(self.skin_idx)
         child._pet_scale = self._pet_scale * 0.7
         self._pet_scale = child._pet_scale
         child._spawn_count = 0  # 下一代重置计数
@@ -1083,7 +1073,7 @@ class DesktopPet(QWidget):
             code = text.toPlainText().strip()
             if code:
                 _save_custom_skin(name.strip(), code)
-                apply_skin(len(SKINS) - 1)  # 切到刚导入的
+                self.skin_idx = len(SKINS) - 1  # 切到刚导入的
                 self._switch_skin(len(SKINS) - 1)
 
     def _check_update(self):
@@ -1155,13 +1145,12 @@ class DesktopPet(QWidget):
         else:
             if getattr(sys, 'frozen', False):
                 # exe 模式：自启指向 exe 自身
-                bat = f'@echo off\r\nstart "" "{sys.executable}"'
+                bat = f'@echo off\r\nstart "" "{sys.executable}"\r\n'
             else:
-                # 开发模式
-                pyw = sys.executable.replace('.exe', 'w.exe')
-                script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pet.py")
-                bat = f'@echo off\r\ncd /d "{os.path.dirname(script)}"\r\nstart "" "{pyw}" "{script}"'
-            with open(sp, 'w') as f:
+                # 开发模式：用 pythonw 避免黑窗
+                d = os.path.dirname(os.path.abspath(__file__))
+                bat = f'@echo off\r\ncd /d "{d}"\r\nstart "" pythonw "{d}\\pet.py"\r\n'
+            with open(sp, 'w', newline='\n') as f:
                 f.write(bat)
             self._autostart = True
         self._autostart_action.setText(f"{'☑' if self._autostart else '☐'} 开机自启")
@@ -1239,7 +1228,7 @@ class DesktopPet(QWidget):
             p.translate(self.width()//2, self.height()//2)
             p.scale(scale, scale)
             p.translate(-self.width()//2, -self.height()//2)
-        pix = Slime.make(self.state, self._frame, self.bg_color)
+        pix = Slime.make(self.state, self._frame, self.bg_color, self.skin_idx)
         # 生气时红色覆盖
         if self._angry > 0:
             p2 = QPainter(pix)
